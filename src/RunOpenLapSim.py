@@ -24,10 +24,13 @@ by Python 3.7
 
 # import packages generic
 import datetime
+from dataclasses import dataclass
+
 import matplotlib.pyplot as plt
 import time
 import argparse
 
+import numpy
 import numpy as np
 
 # import packages (OLP)
@@ -36,110 +39,123 @@ from LapTimeSimCalc import LapTimeSimCalc
 from PostProc import PostProc
 from SetupFileLoader import SetupFileLoader
 
+EXPORT_FILE_PATH = "exports/"
 
-class RunOpenLapSim:
 
-    def __init__(self, setupFileName, trackFileName,
-                 bExport, bPlot, bPlotExtra):
-        # inputs
-        self.setupFileName = setupFileName
-        self.trackFileName = trackFileName
-        self.bExport = bExport
-        self.bPlot = bPlot
-        self.bPlotExtra = bPlotExtra
-        self.trackFilesPath = "trackFiles/"
-        self.exportFilesPath = "exportFiles/"
-        self.setupFilesPath = "setupFiles/"
-        # outputs
-        self.laptime = None
-        self.vcarmax = None
-        self.tcomp = None  # computational time
+@dataclass
+class LapSimOutput:
+    laptime: float  # Lap time in seconds
+    vcarmax: float  # Maximum car velocity in m/s
 
-    @staticmethod
-    def createExportSimFile(vcar, dist, exportFilesPath):
-        time = datetime.datetime.now()
-        timestrf = time.strftime("%b-%d-%Y")
-        NewExportFileName = (exportFilesPath + "SimExport_"
-                             + str(timestrf) + ".txt")
-        newFile = open(NewExportFileName, "w")
+    rms_power: float  # RMS Power drawn from battery (watts)
+    total_energy: float # Total energy consumed (joules)
 
-        for i in range(len(dist)):
-            lineToWrite = (str(dist[i]) + "\t" + str(vcar[i]) + "\n")
-            newFile.write(lineToWrite)
-        newFile.close()
-        return NewExportFileName
+    trans_vcar: np.ndarray  # Velocity samples over time
+    trans_dist: np.ndarray  # Distance samples over time
+    trans_power: np.ndarray  # Power samples over time
+    trans_time: np.ndarray  # Time for above samples
 
-    def run(self):
-        print("---------------------------")
-        print("OpenLapSim")
-        print("---------------------------")
+    tcomp: float  # Computation time in seconds
 
-        # Computation time start
-        tstart = time.time()
-
-        # SetupFile obj instantiation
-        s = SetupFileLoader(self.setupFilesPath + self.setupFileName)
-        s.loadJSON()
-
-        # Run Acceleration Envelope
-        aE = AccEnvCalc(s.setupDict)
-        aE.Run()
-
-        # Run Lap time Simulation
-        trackFile = (self.trackFilesPath + self.trackFileName)
-        l1 = LapTimeSimCalc(trackFile, aE.accEnvDict, 10)
-        l1.Run()
-
-        # Run second simulation using starting speed from first lap
-        l2 = LapTimeSimCalc(trackFile, aE.accEnvDict,
-                            l1.lapTimeSimDict["vxaccEnd"])
-        l2.Run()
+    post_proc: PostProc  # post-processing thingy
 
 
 
-        # set output channels from simulation for Export
-        vcar = l2.lapTimeSimDict["vcar"]  # car speed [m/s]
-        dist = l2.lapTimeSimDict["dist"]  # circuit dist [m]
-        lap_time = l2.lapTimeSimDict["time"]
-        acc = np.gradient(vcar, lap_time)
-        force = s.setupDict["mcar"] * acc + (0.5 * s.setupDict["rho"] * np.square(vcar) * s.setupDict["cx"] * s.setupDict["afrcar"])
-        power = force * vcar
-        # No regen braking :(
-        positive_power = np.maximum(power, np.zeros(power.shape))
-        rms_power = np.sqrt(np.average(np.square(positive_power)))
-        print(f"RMS Power: {rms_power / 1000} kW")
+def createExportSimFile(sim_output: LapSimOutput, exportFilesPath):
+    time = datetime.datetime.now()
+    timestrf = time.strftime("%b-%d-%Y")
+    NewExportFileName = (exportFilesPath + "SimExport_"
+                         + str(timestrf) + ".txt")
+    newFile = open(NewExportFileName, "w")
 
-        if self.bPlotExtra:
-            plt.plot(lap_time, power)
+    data_names = ["time (s)", "vcar (m/s)", "distance (m)", "battery power (W)"]
+    newFile.write('\t'.join(data_names) + '\n')
 
-        # plt.show()
+    for i in range(len(sim_output.trans_dist)):
+        datums = [sim_output.trans_time[i], sim_output.trans_vcar[i], sim_output.trans_dist[i], sim_output.trans_power[i]]
+        line_to_write = '\t'.join([str(d) for d in datums]) + '\n'
+        newFile.write(line_to_write)
+    newFile.close()
+    return NewExportFileName
 
 
-        # export
-        if self.bExport:
-            RunOpenLapSim.createExportSimFile(vcar, dist, self.exportFilesPath)
+def run(setupFilePath, trackFilePath, powerLimit, print_progress=False):
+    if print_progress:
+        print(f"Vehicle model: {setupFilePath}")
+        print(f"Track file: {trackFilePath}")
+        if powerLimit is not None:
+            print(f"{powerLimit}W power limit applied")
 
-        # Computation time end
-        tend = time.time()
-        tcomp = round(tend - tstart, 1)
-        print("Computational time: ", tcomp)
+    # Computation time start
+    tstart = time.time()
 
-        # Post Processing
-        pP = PostProc(aE.accEnvDict, l2.lapTimeSimDict)
-        pP.printData()
-        if self.bPlot:
-            # pP.plotAccEnv()
-            pP.plotGGV()
-            pP.plotLapTimeSim()
-        if self.bPlotExtra:
-            pP.plotLapTimeSimExtra()
-            pP.plotAccEnvExtra()
-        plt.show()  # plot all figure once at the end
+    if print_progress:
+        print("Loading vehicle model file...")
 
-        # output values
-        self.laptime = l2.lapTimeSimDict["laptime"]
-        self.vcarmax = l2.lapTimeSimDict["vcarmax"]
-        self.tcomp = tcomp
+    # SetupFile obj instantiation
+    s = SetupFileLoader(setupFilePath, power_limit_kw=powerLimit)
+    s.loadJSON()
+
+    if print_progress:
+        print("Calculating acceleration envelope...")
+
+    # Run Acceleration Envelope
+    aE = AccEnvCalc(s.setupDict)
+    aE.Run()
+
+    if print_progress:
+        print("Simulating first lap (1 of 2)...")
+
+    # Run Lap time Simulation
+    l1 = LapTimeSimCalc(trackFilePath, aE.accEnvDict, 10)
+    l1.Run()
+
+    if print_progress:
+        print("Simulating hot lap (2 of 2)...")
+
+    # Run second simulation using starting speed from first lap
+    l2 = LapTimeSimCalc(trackFilePath, aE.accEnvDict,
+                        l1.lapTimeSimDict["vxaccEnd"])
+    l2.Run()
+
+    if print_progress:
+        print("Processing simulation results...")
+
+    # set output channels from simulation for Export
+    vcar = l2.lapTimeSimDict["vcar"]  # car speed [m/s]
+    dist = l2.lapTimeSimDict["dist"]  # circuit dist [m]
+    lap_time = l2.lapTimeSimDict["time"]
+    lap_time[-1] = l2.lapTimeSimDict["laptime"]
+    acc = np.gradient(vcar, lap_time)
+    # Calculate force (accounting for acceleration and air resistance)
+    force = s.setupDict["mcar"] * acc + (0.5 * s.setupDict["rho"] * np.square(vcar) * s.setupDict["cx"] * s.setupDict["afrcar"])
+    power = force * vcar
+
+    # Factor in drivetrain efficiency
+    power = power / s.setupDict["reff"]
+
+    # No regen braking :(
+    positive_power = np.maximum(power, np.zeros(power.shape))
+    rms_power = np.sqrt(np.average(np.square(positive_power)))
+
+    total_energy = numpy.trapz(positive_power, x=lap_time)
+
+
+    pP = PostProc(aE.accEnvDict, l2.lapTimeSimDict)
+
+    # Computation time end
+    tend = time.time()
+    tcomp = round(tend - tstart, 1)
+
+    if print_progress:
+        print(f"Simulation completed in {tcomp} seconds.")
+
+    laptime = l2.lapTimeSimDict["laptime"]
+    vcarmax = l2.lapTimeSimDict["vcarmax"]
+    tcomp = tcomp
+
+    return LapSimOutput(vcarmax=vcarmax, laptime=laptime, tcomp=tcomp, rms_power=rms_power, trans_vcar=vcar,
+                        trans_dist=dist, trans_power=positive_power, trans_time=lap_time, post_proc=pP, total_energy=total_energy)
 
 
 # ----------------------------------------------------------------------------
@@ -151,6 +167,8 @@ def main():
 
     parser.add_argument("--setup", type=str, default="SetupFile.json", help="Name of the setup file.")
     parser.add_argument("--track", type=str, default="TrackFile.txt", help="Name of the track file.")
+    parser.add_argument("--power-limit", type=float, help="Vehicle motor power limit.")
+    parser.add_argument("--n-laps", type=int, default=1, help="Total number of laps.")
     parser.add_argument("--export", action="store_true", help="Export results.")
     parser.add_argument("--plot", action="store_true", help="Plot basic results.")
     parser.add_argument("--plot-extra", action="store_true", help="Enable extra plots.")
@@ -159,15 +177,51 @@ def main():
 
     setupFileName = args.setup
     trackFileName = args.track
+    powerLimit = args.power_limit
     bExport = args.export
     bPlot = args.plot
     bPlotExtra = args.plot_extra
+    n_laps = args.n_laps
 
     # object instantiation
-    runOpenLapSim = RunOpenLapSim(setupFileName, trackFileName,
-                                  bExport, bPlot, bPlotExtra)
-    runOpenLapSim.run()
+    results = run(setupFileName, trackFileName, powerLimit, print_progress=True)
+    print("------------------")
+    print("    RESULTS")
+    print("------------------")
+    print("--Single lap--")
+    print(f"Lap time: {results.laptime} seconds")
+    print(f"Max speed: {results.vcarmax} m/s")
+    print(f"Energy used: {round(results.total_energy / 1000, 2)} kJ ({round(results.total_energy * 2.778e-4, 2)} Wh)")
+    if n_laps > 1:
+        print(f"--Overall ({n_laps} laps)--")
+        total_time = results.laptime * n_laps
+        print(f"Total time: {int(total_time // 60)}:{round(total_time % 60, 2)}")
+        total_energy = results.total_energy * n_laps
+        print(f"Total energy used: {round(total_energy / 1000, 2)} kJ ({round(total_energy * 2.778e-4, 2)} Wh)")
+
+    print(f"RMS Power: {round(results.rms_power / 1000, 2)} kW")
+
+
+    # Power over time plot
+    # if bPlotExtra:
+    #     plt.plot(results.trans_time, results.trans_power)
+
+    # export
+    if bExport:
+        createExportSimFile(sim_output=results, exportFilesPath=EXPORT_FILE_PATH)
+
+    # Post Processing data
+    if bPlot:
+        # pP.plotAccEnv()
+        results.post_proc.plotGGV()
+        results.post_proc.plotLapTimeSim()
+    if bPlotExtra:
+        results.post_proc.plotLapTimeSimExtra()
+        results.post_proc.plotAccEnvExtra()
+    plt.show()  # plot all figure once at the end
 
 
 if __name__ == '__main__':
     main()
+
+
