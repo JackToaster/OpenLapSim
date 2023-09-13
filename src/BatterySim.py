@@ -7,16 +7,25 @@ import SimFileReader
 
 import matplotlib.pyplot as plt
 
+
+# CELL PARAMETERS
+# ---------------
+
+# thermal parameters
+CELL_Rin = 14  # Internal thermal resistance of cell (Degrees C/Watt)
+CELL_Rout = 60  # Thermal resistance between cell and ambient (Degrees C/Watt)
+Tamb = 30  # Ambient temperature (Degrees C)
+
 # Based on another 18650 cell, not VTC6
-CELL_MASS = 0.0465  # kg
-CELL_HEAT_CAPACITY = 902  # J/kg*K
-MODULE_HEAT_CAPACITY = CELL_MASS * CELL_HEAT_CAPACITY * 6
+CELL_HEAT_CAPACITY = 43.5
 
 VTC6_OCV_SOC = np.array([
     [0.0, 0.1666, 0.3333, 0.5, 0.6666, 0.83333, 1.0],  # SoC (0-1)
     [2.5, 3.4, 3.6, 3.75, 3.85, 4.05, 4.2]  # OCV (Open circuit voltage)
 ])
 
+
+# TODO Make these next two parameters per-cell rather than per-module for easier testing of parameters
 # TODO This data is a total guess based on VTC6 datasheet and enepaq datasheet.
 # This could be greatly improved from battery testing data.
 # Also, Rint varies with SoC as well as temperature...
@@ -36,6 +45,7 @@ VTC6_CAPACITY_CURRENT = np.array([
 ])
 
 
+# Output data structure for each timestep of the simulation.
 @dataclass
 class BatterySimOutput:
     t_internal: float
@@ -47,12 +57,14 @@ class BatterySimOutput:
 
 
 class BatteryModel:
-    def __init__(self, initial_temperature, initial_soc, series_cells=84):
+    def __init__(self, initial_temperature, initial_soc, series_cells=84, parallel_cells=6):
         self.t_internal = initial_temperature  # Internal temperature (degrees C)
         self.t_anode = initial_temperature  # Anode temperature
         self.soc = initial_soc  # State of charge (0-1)
         self.series = series_cells
+        self.parallel = parallel_cells
 
+    # Step the simulation forward in time. This is using a simple Euler integration scheme.
     def update(self, power, timestep) -> BatterySimOutput:
         cell_ocv = np.interp(x=self.soc, xp=VTC6_OCV_SOC[0], fp=VTC6_OCV_SOC[1])
         ocv = cell_ocv * self.series
@@ -62,22 +74,30 @@ class BatteryModel:
         if det < 0:
             print("Simulation failed: Battery cannot provide needed power")
             return None
+
         current = (ocv - math.sqrt(det)) / (2 * rint)
         voltage = ocv - current * rint
         # print(current)
         power = current * current * rint
-        energy = power * timestep
-        temp_rise = energy / (MODULE_HEAT_CAPACITY * self.series)
+        heat = power * timestep
+        delta_temperature = self.t_internal - Tamb
+        heat_out = delta_temperature / (CELL_Rin + CELL_Rout) * self.series * self.parallel
+
+        net_heat = heat - heat_out
+
+        temp_rise = net_heat / (CELL_HEAT_CAPACITY * self.parallel * self.series)
         # print(temp_rise)
 
         capacity = np.interp(x=current, xp=VTC6_CAPACITY_CURRENT[0], fp=VTC6_CAPACITY_CURRENT[1])
         capacity_loss = current * timestep
+
         soc_loss = capacity_loss / (capacity * 3600)
         self.soc -= soc_loss
 
         self.t_internal += temp_rise
 
-        self.t_anode = self.t_internal
+        # Resistive divider (assuming cell anode casing and cooling solution have negligible heat capacity)
+        self.t_anode = Tamb + (self.t_internal - Tamb) * CELL_Rout / (CELL_Rin + CELL_Rout)
 
         return BatterySimOutput(t_internal=self.t_internal, t_anode=self.t_anode, soc=self.soc, voltage=voltage,
                                 current=current, rint=rint)
@@ -195,6 +215,8 @@ def main():
     parser.add_argument("--break-after", type=int, default=None, help="Stop after this many laps")
     parser.add_argument("--break-time", type=int, default=0, help="Stop for this many seconds")
 
+    parser.add_argument("--start-temp", type=float, default=Tamb, help="Starting temperature for cells")
+
     # Parse the command-line arguments
     args = parser.parse_args()
 
@@ -204,6 +226,7 @@ def main():
     timestep = args.timestep
     break_after = args.break_after
     break_time = args.break_time
+    start_temp = args.start_temp
 
     # Print the values of the arguments
     print(f"Simulation File Path: {simulation_file}")
@@ -214,7 +237,7 @@ def main():
     lap_energy = np.trapz(sim_data.power, x=sim_data.time)
     lap_time = sim_data.time[-1]
 
-    bm = BatteryModel(23, 1, series_cells=84)
+    bm = BatteryModel(start_temp, 1, series_cells=84)
 
     results = []
     result_times = []
@@ -235,6 +258,8 @@ def main():
             times = sim_data.time[start_idx:end_idx+1]
 
             avg_power = np.trapz(powers, x=times) / dt
+            timestep_result = battery_model.update(avg_power, dt)
+
             results_array.append(battery_model.update(avg_power, dt))
             times_array.append(times_array[-1] + dt)
 
