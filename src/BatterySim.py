@@ -260,7 +260,7 @@ def main():
             avg_power = np.trapz(powers, x=times) / dt
             timestep_result = battery_model.update(avg_power, dt)
 
-            results_array.append(battery_model.update(avg_power, dt))
+            results_array.append(timestep_result)
             times_array.append(times_array[-1] + dt)
 
     # print(f"Lap energy: {lap_energy}\n Energy from one lap: {sim_lap()}")
