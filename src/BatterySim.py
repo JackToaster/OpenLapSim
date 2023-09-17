@@ -22,9 +22,12 @@ VTC6_OCV_SOC = np.array([
 # Also, Rint varies with SoC as well as temperature...
 VTC6_RINT_T = np.array([
     [-20.0, -10.0,  0.0,    23.0,   45.0, 60.0],  # Temperature (Degrees C)
-    [0.013, 0.0083, 0.0069, 0.0034, 0.0028, 0.0028]  # RINT (Internal resistance) - this is of the entire module, not a single cell.
+    [0.013, 0.0083, 0.0069, 0.0034, 0.0028, 0.0028]  # RINT (Internal resistance) - this is of the entire module,
+    # not a single cell.
 ])
 
+RINT_MUL = 2.0
+VTC6_RINT_T[1] = VTC6_RINT_T[1] * RINT_MUL
 
 # TODO This data is a total guess based on VTC6 datasheet and enepaq datasheet. Also varies with temperature.
 VTC6_CAPACITY_CURRENT = np.array([
@@ -60,6 +63,31 @@ class BatteryModel:
             print("Simulation failed: Battery cannot provide needed power")
             return None
         current = (ocv - math.sqrt(det)) / (2 * rint)
+        voltage = ocv - current * rint
+        # print(current)
+        power = current * current * rint
+        energy = power * timestep
+        temp_rise = energy / (MODULE_HEAT_CAPACITY * self.series)
+        # print(temp_rise)
+
+        capacity = np.interp(x=current, xp=VTC6_CAPACITY_CURRENT[0], fp=VTC6_CAPACITY_CURRENT[1])
+        capacity_loss = current * timestep
+        soc_loss = capacity_loss / (capacity * 3600)
+        self.soc -= soc_loss
+
+        self.t_internal += temp_rise
+
+        self.t_anode = self.t_internal
+
+        return BatterySimOutput(t_internal=self.t_internal, t_anode=self.t_anode, soc=self.soc, voltage=voltage,
+                                current=current, rint=rint)
+
+    def update_current(self, current, timestep):
+        cell_ocv = np.interp(x=self.soc, xp=VTC6_OCV_SOC[0], fp=VTC6_OCV_SOC[1])
+        ocv = cell_ocv * self.series
+        cell_rint = np.interp(x=self.t_internal, xp=VTC6_RINT_T[0], fp=VTC6_RINT_T[1])
+        rint = cell_rint * self.series
+
         voltage = ocv - current * rint
         # print(current)
         power = current * current * rint
