@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 # thermal parameters
 CELL_Rin = 14  # Internal thermal resistance of cell (Degrees C/Watt)
-CELL_Rout = 30  # Thermal resistance between cell and ambient (Degrees C/Watt)
+CELL_Rout = 500  # Thermal resistance between cell and ambient (Degrees C/Watt)
 Tamb = 30  # Ambient temperature (Degrees C)
 
 # Based on another 18650 cell, not VTC6
@@ -35,7 +35,7 @@ VTC6_RINT_T = np.array([
     # not a single cell.
 ])
 
-RINT_MUL = 2.0
+RINT_MUL = 1.75
 VTC6_RINT_T[1] = VTC6_RINT_T[1] * RINT_MUL
 
 # TODO This data is a total guess based on VTC6 datasheet and enepaq datasheet. Also varies with temperature.
@@ -112,7 +112,7 @@ class BatteryModel:
         # print(current)
         power = current * current * rint
         energy = power * timestep
-        temp_rise = energy / (MODULE_HEAT_CAPACITY * self.series)
+        temp_rise = energy / (CELL_HEAT_CAPACITY * self.parallel * self.series)
         # print(temp_rise)
 
         capacity = np.interp(x=current, xp=VTC6_CAPACITY_CURRENT[0], fp=VTC6_CAPACITY_CURRENT[1])
@@ -122,7 +122,8 @@ class BatteryModel:
 
         self.t_internal += temp_rise
 
-        self.t_anode = self.t_internal
+        # Resistive divider (assuming cell anode casing and cooling solution have negligible heat capacity)
+        self.t_anode = Tamb + (self.t_internal - Tamb) * CELL_Rout / (CELL_Rin + CELL_Rout)
 
         return BatterySimOutput(t_internal=self.t_internal, t_anode=self.t_anode, soc=self.soc, voltage=voltage,
                                 current=current, rint=rint)
