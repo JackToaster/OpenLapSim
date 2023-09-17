@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 # thermal parameters
 CELL_Rin = 14  # Internal thermal resistance of cell (Degrees C/Watt)
-CELL_Rout = 60  # Thermal resistance between cell and ambient (Degrees C/Watt)
+CELL_Rout = 30  # Thermal resistance between cell and ambient (Degrees C/Watt)
 Tamb = 30  # Ambient temperature (Degrees C)
 
 # Based on another 18650 cell, not VTC6
