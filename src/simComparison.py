@@ -1,3 +1,5 @@
+import numpy as np
+
 import BatterySim
 import csv
 import matplotlib.pyplot as plt
@@ -101,15 +103,18 @@ if __name__ == "__main__":
 
     current_values = [result.current for result in test_results]
 
-    bm = BatterySim.BatteryModel(initial_temperature=test_results[0].t_anode, initial_soc=0.7, series_cells=1)
+    bm = BatterySim.BatteryModel(initial_temperature=test_results[0].t_anode, initial_soc=0.95, series_cells=1)
 
     sim_results = []
 
-    # To make things match up:
-    print(current_values[0])
+    total_charge = np.trapz(np.array(current_values), x=np.array(times))
+    total_mah = total_charge / 3600 * 1000
+    print(f"Test used {round(total_mah, 1)} mAh, or {round(total_mah/18000 * 100, 1)}% of battery capacity.")
 
+    # To make things match up in plot:
     sim_results.append(bm.update_current(current_values[0], 0.1))
 
+    # TODO Subdivide timesteps for more accurate sim
     for i in range(len(times) - 1):
         t_start = times[i]
         t_end = times[i+1]

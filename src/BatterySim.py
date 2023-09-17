@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 
 # thermal parameters
 CELL_Rin = 14  # Internal thermal resistance of cell (Degrees C/Watt)
-CELL_Rout = 500  # Thermal resistance between cell and ambient (Degrees C/Watt)
 Tamb = 30  # Ambient temperature (Degrees C)
 
 # Based on another 18650 cell, not VTC6
@@ -35,8 +34,8 @@ VTC6_RINT_T = np.array([
     # not a single cell.
 ])
 
-RINT_MUL = 1.75
-VTC6_RINT_T[1] = VTC6_RINT_T[1] * RINT_MUL
+# fudge factor for hte actual amount of heat generated
+HEATING_MUL = 1.95
 
 # TODO This data is a total guess based on VTC6 datasheet and enepaq datasheet. Also varies with temperature.
 VTC6_CAPACITY_CURRENT = np.array([
@@ -57,12 +56,13 @@ class BatterySimOutput:
 
 
 class BatteryModel:
-    def __init__(self, initial_temperature, initial_soc, series_cells=84, parallel_cells=6):
+    def __init__(self, initial_temperature, initial_soc, series_cells=84, parallel_cells=6, cell_rout=500):
         self.t_internal = initial_temperature  # Internal temperature (degrees C)
         self.t_anode = initial_temperature  # Anode temperature
         self.soc = initial_soc  # State of charge (0-1)
         self.series = series_cells
         self.parallel = parallel_cells
+        self.cell_rout = cell_rout
 
     # Step the simulation forward in time. This is using a simple Euler integration scheme.
     def update(self, power, timestep) -> BatterySimOutput:
@@ -80,11 +80,11 @@ class BatteryModel:
         # print(current)
         power = current * current * rint
         heat = power * timestep
+        heat *= HEATING_MUL
         delta_temperature = self.t_internal - Tamb
-        heat_out = delta_temperature / (CELL_Rin + CELL_Rout) * self.series * self.parallel
+        heat_out = delta_temperature / (CELL_Rin + self.cell_rout) * self.series * self.parallel
 
         net_heat = heat - heat_out
-
         temp_rise = net_heat / (CELL_HEAT_CAPACITY * self.parallel * self.series)
         # print(temp_rise)
 
@@ -97,7 +97,7 @@ class BatteryModel:
         self.t_internal += temp_rise
 
         # Resistive divider (assuming cell anode casing and cooling solution have negligible heat capacity)
-        self.t_anode = Tamb + (self.t_internal - Tamb) * CELL_Rout / (CELL_Rin + CELL_Rout)
+        self.t_anode = Tamb + (self.t_internal - Tamb) * self.cell_rout / (CELL_Rin + self.cell_rout)
 
         return BatterySimOutput(t_internal=self.t_internal, t_anode=self.t_anode, soc=self.soc, voltage=voltage,
                                 current=current, rint=rint)
@@ -111,8 +111,13 @@ class BatteryModel:
         voltage = ocv - current * rint
         # print(current)
         power = current * current * rint
-        energy = power * timestep
-        temp_rise = energy / (CELL_HEAT_CAPACITY * self.parallel * self.series)
+        heat = power * timestep
+        heat *= HEATING_MUL
+        delta_temperature = self.t_internal - Tamb
+        heat_out = delta_temperature / (CELL_Rin + self.cell_rout) * self.series * self.parallel
+
+        net_heat = heat - heat_out
+        temp_rise = net_heat / (CELL_HEAT_CAPACITY * self.parallel * self.series)
         # print(temp_rise)
 
         capacity = np.interp(x=current, xp=VTC6_CAPACITY_CURRENT[0], fp=VTC6_CAPACITY_CURRENT[1])
@@ -123,7 +128,7 @@ class BatteryModel:
         self.t_internal += temp_rise
 
         # Resistive divider (assuming cell anode casing and cooling solution have negligible heat capacity)
-        self.t_anode = Tamb + (self.t_internal - Tamb) * CELL_Rout / (CELL_Rin + CELL_Rout)
+        self.t_anode = Tamb + (self.t_internal - Tamb) * self.cell_rout / (CELL_Rin + self.cell_rout)
 
         return BatterySimOutput(t_internal=self.t_internal, t_anode=self.t_anode, soc=self.soc, voltage=voltage,
                                 current=current, rint=rint)
@@ -238,7 +243,7 @@ def main():
     lap_energy = np.trapz(sim_data.power, x=sim_data.time)
     lap_time = sim_data.time[-1]
 
-    bm = BatteryModel(start_temp, 1, series_cells=84)
+    bm = BatteryModel(start_temp, 1, series_cells=84, cell_rout=25)
 
     results = []
     result_times = []
