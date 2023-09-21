@@ -223,6 +223,8 @@ def main():
 
     parser.add_argument("--start-temp", type=float, default=Tamb, help="Starting temperature for cells")
 
+    parser.add_argument("--cooling", type=float, default=500, help="Thermal resistance cell-ambient (Degrees C/W)")
+
     # Parse the command-line arguments
     args = parser.parse_args()
 
@@ -233,6 +235,7 @@ def main():
     break_after = args.break_after
     break_time = args.break_time
     start_temp = args.start_temp
+    cell_rout = args.cooling
 
     # Print the values of the arguments
     print(f"Simulation File Path: {simulation_file}")
@@ -243,7 +246,7 @@ def main():
     lap_energy = np.trapz(sim_data.power, x=sim_data.time)
     lap_time = sim_data.time[-1]
 
-    bm = BatteryModel(start_temp, 1, series_cells=84, cell_rout=25)
+    bm = BatteryModel(start_temp, 1, series_cells=84, cell_rout=cell_rout)
 
     results = []
     result_times = []
