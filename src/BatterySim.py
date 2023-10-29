@@ -12,11 +12,11 @@ import matplotlib.pyplot as plt
 # ---------------
 
 # thermal parameters
-CELL_Rin = 14  # Internal thermal resistance of cell (Degrees C/Watt)
-Tamb = 30  # Ambient temperature (Degrees C)
+CELL_Rin = 0.8  # Internal thermal resistance of cell (Degrees C/Watt)
+Tamb = 23.4  # Ambient temperature (Degrees C) TODO Make this a parameter
 
-# Based on another 18650 cell, not VTC6
-CELL_HEAT_CAPACITY = 43.5
+# Based on another 18650 cell (30Q), not VTC6
+CELL_HEAT_CAPACITY = 40.5
 
 VTC6_OCV_SOC = np.array([
     [0.0, 0.1666, 0.3333, 0.5, 0.6666, 0.83333, 1.0],  # SoC (0-1)
@@ -35,7 +35,7 @@ VTC6_RINT_T = np.array([
 ])
 
 # fudge factor for hte actual amount of heat generated
-HEATING_MUL = 1.95
+HEATING_MUL = 1.8
 
 # TODO This data is a total guess based on VTC6 datasheet and enepaq datasheet. Also varies with temperature.
 VTC6_CAPACITY_CURRENT = np.array([
@@ -70,6 +70,7 @@ class BatteryModel:
         ocv = cell_ocv * self.series
         cell_rint = np.interp(x=self.t_internal, xp=VTC6_RINT_T[0], fp=VTC6_RINT_T[1])
         rint = cell_rint * self.series
+        rint *= HEATING_MUL
         det = ocv * ocv - 4 * power * rint
         if det < 0:
             print("Simulation failed: Battery cannot provide needed power")
@@ -80,7 +81,7 @@ class BatteryModel:
         # print(current)
         power = current * current * rint
         heat = power * timestep
-        heat *= HEATING_MUL
+        # heat *= HEATING_MUL
         delta_temperature = self.t_internal - Tamb
         heat_out = delta_temperature / (CELL_Rin + self.cell_rout) * self.series * self.parallel
 
@@ -106,13 +107,13 @@ class BatteryModel:
         cell_ocv = np.interp(x=self.soc, xp=VTC6_OCV_SOC[0], fp=VTC6_OCV_SOC[1])
         ocv = cell_ocv * self.series
         cell_rint = np.interp(x=self.t_internal, xp=VTC6_RINT_T[0], fp=VTC6_RINT_T[1])
-        rint = cell_rint * self.series
+        rint = cell_rint * self.series * HEATING_MUL
 
         voltage = ocv - current * rint
         # print(current)
         power = current * current * rint
         heat = power * timestep
-        heat *= HEATING_MUL
+        # heat *= HEATING_MUL
         delta_temperature = self.t_internal - Tamb
         heat_out = delta_temperature / (CELL_Rin + self.cell_rout) * self.series * self.parallel
 

@@ -1,7 +1,7 @@
 {
     "setupName" : "BR23E",
     "mcar"	: 300,
-    "clt"	: 1.22,
+    "clt"	: 1.12,
     "cx"	: 0.612,
     "afrcar"	: 1.15,
     "mbrk"	: 1000,

@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
     current_values = [result.current for result in test_results]
 
-    bm = BatterySim.BatteryModel(initial_temperature=test_results[0].t_anode, initial_soc=0.95, series_cells=1)
+    bm = BatterySim.BatteryModel(initial_temperature=test_results[0].t_anode, initial_soc=1.05, series_cells=1, cell_rout=1)
 
     sim_results = []
 
