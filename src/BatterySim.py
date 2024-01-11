@@ -53,7 +53,7 @@ class BatterySimOutput:
     voltage: float
     current: float
     rint: float
-
+    q_out: float
 
 class BatteryModel:
     def __init__(self, initial_temperature, initial_soc, series_cells=84, parallel_cells=6, cell_rout=500):
@@ -101,7 +101,7 @@ class BatteryModel:
         self.t_anode = Tamb + (self.t_internal - Tamb) * self.cell_rout / (CELL_Rin + self.cell_rout)
 
         return BatterySimOutput(t_internal=self.t_internal, t_anode=self.t_anode, soc=self.soc, voltage=voltage,
-                                current=current, rint=rint)
+                                current=current, rint=rint, q_out=heat_out)
 
     def update_current(self, current, timestep):
         cell_ocv = np.interp(x=self.soc, xp=VTC6_OCV_SOC[0], fp=VTC6_OCV_SOC[1])
@@ -132,7 +132,7 @@ class BatteryModel:
         self.t_anode = Tamb + (self.t_internal - Tamb) * self.cell_rout / (CELL_Rin + self.cell_rout)
 
         return BatterySimOutput(t_internal=self.t_internal, t_anode=self.t_anode, soc=self.soc, voltage=voltage,
-                                current=current, rint=rint)
+                                current=current, rint=rint, q_out=heat_out)
 
 
 def frange(x, y, jump):
@@ -149,6 +149,7 @@ def plot_results(results, times):
     voltage_values = [result.voltage for result in results]
     current_values = [result.current for result in results]
     rint_values = [result.rint for result in results]
+    q_out_values = [result.q_out for result in results]
 
     # Create subplots
     fig, axs = plt.subplots(2, 1, figsize=(10, 8))
@@ -197,9 +198,18 @@ def plot_results(results, times):
     axs2.plot(times, soc_values, label='SOC', color='tab:red')
     axs2.tick_params(axis='y', labelcolor='tab:red')
 
+    # Create a twin y-axis for heat output
+    axs4 = ax0.twinx()
+    axs4.spines['right'].set_position(('outward', 60))  # Adjust the position of the third y-axis
+
+    axs4.set_ylabel('Heat output (W)', color='tab:orange')
+    axs4.plot(times, q_out_values, label='Q_out', color='tab:orange')
+    axs4.tick_params(axis='y', labelcolor='tab:orange')
+
     lines, labels = ax0.get_legend_handles_labels()
     lines2, labels2 = axs2.get_legend_handles_labels()
-    ax0.legend(lines + lines2, labels + labels2, loc='upper left')
+    lines3, labels3 = axs4.get_legend_handles_labels()
+    ax0.legend(lines + lines2 + lines3, labels + labels2 + labels3, loc='upper left')
 
     # Adjust layout
     plt.tight_layout()
@@ -219,7 +229,7 @@ def main():
     parser.add_argument("-t", "--timestep", type=float, default=1, help="Transient simulation timestep in seconds ("
                                                                         "default: 1)")
 
-    parser.add_argument("--break-after", type=int, default=None, help="Stop after this many laps")
+    parser.add_argument("--break-after", type=str, default=None, help="Stop after this many laps")
     parser.add_argument("--break-time", type=int, default=0, help="Stop for this many seconds")
 
     parser.add_argument("--start-temp", type=float, default=Tamb, help="Starting temperature for cells")
@@ -233,7 +243,7 @@ def main():
     simulation_file = args.simulation_file
     num_laps = args.n_laps
     timestep = args.timestep
-    break_after = args.break_after
+    break_after = [int(item) for item in args.break_after.split(',')]
     break_time = args.break_time
     start_temp = args.start_temp
     cell_rout = args.cooling
@@ -283,18 +293,19 @@ def main():
     result_times.append(0)
 
     if break_after is not None:
-        print(f"Simulating {break_after} laps...")
-        for lap in range(break_after):
+        break_after.append(num_laps)
+        print(f"Simulating {break_after[0]} laps...")
+        for lap in range(break_after[0]):
             sim_lap(results, result_times, bm)
+        for break_no in range(1, len(break_after)):
+            print(f"Simulating {break_time} second break")
+            for _t in range(1, math.ceil(break_time / timestep)):
+                results.append(bm.update(0, timestep))
+                result_times.append(result_times[-1] + timestep)
 
-        print(f"Simulating {break_time} second break")
-        for _t in range(math.ceil(break_time / timestep)):
-            results.append(bm.update(0, timestep))
-            result_times.append(result_times[-1] + timestep)
-
-        print(f"Simulating {num_laps - break_after} laps...")
-        for lap in range(break_after, num_laps):
-            sim_lap(results, result_times, bm)
+            print(f"Simulating {break_after[break_no] - break_after[break_no - 1]} laps...")
+            for lap in range(break_after[break_no - 1], break_after[break_no]):
+                sim_lap(results, result_times, bm)
     else:
         print(f"Simulating {num_laps} laps...")
         for lap in range(num_laps):

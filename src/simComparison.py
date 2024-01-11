@@ -24,7 +24,7 @@ def read_battery_data(file_path):
             time_seconds.append(time_minutes * 60.0)
 
             # Create BatterySimOutput object and append to battery_data
-            battery_output = BatterySim.BatterySimOutput(t_internal=cathode_temp, t_anode=anode_temp, soc=0, voltage=voltage, current=current, rint=0)  # Replace 0.0 with actual rint
+            battery_output = BatterySim.BatterySimOutput(t_internal=cathode_temp, t_anode=anode_temp, soc=0, voltage=voltage, current=current, rint=0, q_out=0)  # Replace 0.0 with actual rint
             battery_data.append(battery_output)
 
     return time_seconds, battery_data
